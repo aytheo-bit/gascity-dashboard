@@ -7,6 +7,13 @@ describe('views/registry', () => {
     expect(ids).toContain('health');
   });
 
+  it('contains the opt-in read-only Operations view', () => {
+    const operations = ALL_VIEWS.find((view) => view.id === 'operations-home');
+    expect(operations?.kind).toBe('firstParty');
+    expect(operations?.path).toBe('/operations');
+    expect(operations?.nav?.label).toBe('Operations');
+  });
+
   it('contains the activity view as a core route', () => {
     const activity = ALL_VIEWS.find((v) => v.id === 'activity');
     expect(activity).toBeDefined();

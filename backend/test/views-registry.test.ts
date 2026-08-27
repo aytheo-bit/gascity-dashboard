@@ -29,6 +29,13 @@ function makeConfig(overrides: Partial<AdminConfig> = {}): AdminConfig {
     operatorWireAlias: 'human',
     decisionLabel: 'needs/operator',
     modules: {
+      operationsHome: {
+        snapshotPath: '',
+        expectedUid: 0,
+        expectedMode: 0o600,
+        maxAgeSeconds: 300,
+        maxBytes: 1048576,
+      },
       maintainer: {
         githubRepo: 'gastownhall/gascity',
         slingTarget: 'mayor',
@@ -75,6 +82,10 @@ describe('views/registry', () => {
   test('ALL_MODULES includes the maintainer module', () => {
     const ids = ALL_MODULES.map((m) => m.id);
     assert.ok(ids.includes('maintainer'), `expected 'maintainer' in ${JSON.stringify(ids)}`);
+  });
+
+  test('ALL_MODULES includes the opt-in operations-home module', () => {
+    assert.ok(ALL_MODULES.some((module) => module.id === 'operations-home'));
   });
 
   test('ALL_MODULES has no duplicate ids', () => {

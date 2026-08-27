@@ -33,7 +33,13 @@ const backendColocatedTestGlobs = ['backend/src/**/*.test.ts', 'backend/src/**/f
 // protection — the drift-detector closes that window.
 // Defined ABOVE `export default` so `moduleIsolationConfigs()` (called
 // during default-export evaluation) doesn't TDZ-throw when it reads it.
-export const MODULE_ISOLATION_NAMES = ['maintainer', 'health', 'activity', 'reef'];
+export const MODULE_ISOLATION_NAMES = [
+  'maintainer',
+  'health',
+  'activity',
+  'reef',
+  'operations-home',
+];
 
 export default tseslint.config(
   {

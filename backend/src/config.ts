@@ -29,8 +29,17 @@ export interface MaintainerModuleConfig {
   cachePath?: string;
 }
 
+export interface OperationsHomeModuleConfig {
+  snapshotPath: string;
+  expectedUid: number;
+  expectedMode: number;
+  maxAgeSeconds: number;
+  maxBytes: number;
+}
+
 export interface ModulesConfig {
   maintainer: MaintainerModuleConfig;
+  operationsHome: OperationsHomeModuleConfig;
 }
 
 export interface AdminConfig {
@@ -280,6 +289,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AdminConfig {
       maintainer: maintainerEnabled
         ? loadMaintainerModuleConfig(env)
         : defaultMaintainerModuleConfig(),
+      operationsHome: loadOperationsHomeModuleConfig(
+        env,
+        enabledModules?.has('operations-home') ?? false,
+      ),
     },
     useFixtures: env.SNAPSHOT_USE_FIXTURES === '1',
     enabledModules,
@@ -289,6 +302,44 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AdminConfig {
     // mirrors the value into the wire-shape; null when unset or empty.
     defaultView:
       env.DEFAULT_VIEW !== undefined && env.DEFAULT_VIEW.length > 0 ? env.DEFAULT_VIEW : null,
+  };
+}
+
+function loadOperationsHomeModuleConfig(
+  env: NodeJS.ProcessEnv,
+  enabled: boolean,
+): OperationsHomeModuleConfig {
+  const inert: OperationsHomeModuleConfig = {
+    snapshotPath: '',
+    expectedUid: 0,
+    expectedMode: 0o600,
+    maxAgeSeconds: 300,
+    maxBytes: 1024 * 1024,
+  };
+  if (!enabled) return inert;
+
+  const snapshotPath = env.OPERATIONS_HOME_SNAPSHOT_PATH ?? '';
+  if (!isValidHostPath(snapshotPath) || snapshotPath === '/') {
+    throw new Error('Invalid OPERATIONS_HOME_SNAPSHOT_PATH: expected a safe absolute file path');
+  }
+  const expectedUid = Number(env.OPERATIONS_HOME_SNAPSHOT_UID);
+  if (!Number.isSafeInteger(expectedUid) || expectedUid < 0) {
+    throw new Error('Invalid OPERATIONS_HOME_SNAPSHOT_UID: expected a non-negative integer');
+  }
+  const modeText = env.OPERATIONS_HOME_SNAPSHOT_MODE ?? '0600';
+  if (!/^0[0-7]{3}$/.test(modeText)) {
+    throw new Error('Invalid OPERATIONS_HOME_SNAPSHOT_MODE: expected four octal digits');
+  }
+  const maxAgeSeconds = Number(env.OPERATIONS_HOME_SNAPSHOT_MAX_AGE_SECONDS ?? '300');
+  if (!Number.isFinite(maxAgeSeconds) || maxAgeSeconds < 0) {
+    throw new Error('Invalid OPERATIONS_HOME_SNAPSHOT_MAX_AGE_SECONDS');
+  }
+  return {
+    snapshotPath,
+    expectedUid,
+    expectedMode: Number.parseInt(modeText, 8),
+    maxAgeSeconds,
+    maxBytes: 1024 * 1024,
   };
 }
 

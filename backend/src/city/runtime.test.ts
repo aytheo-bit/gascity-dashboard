@@ -19,6 +19,13 @@ function makeConfig(overrides: Partial<AdminConfig> = {}): AdminConfig {
     disabled: false,
     readOnly: false,
     modules: {
+      operationsHome: {
+        snapshotPath: '',
+        expectedUid: 0,
+        expectedMode: 0o600,
+        maxAgeSeconds: 300,
+        maxBytes: 1048576,
+      },
       maintainer: {
         githubRepo: 'gastownhall/gascity',
         slingTarget: 'mayor',

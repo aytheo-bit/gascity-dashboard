@@ -45,6 +45,7 @@ export { buildRelationIndex } from './links/relation-index.js';
 export * from './convoy/projection.js';
 export * from './city.js';
 export * from './operator.js';
+export * from './operations-home.js';
 export * from './operator-mail.js';
 export * from './maintainer-sling.js';
 export * from './context-window.js';

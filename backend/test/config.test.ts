@@ -8,6 +8,43 @@ import { loadConfig, parseModulesEnabled, __resetMaintainerAliasWarnState } from
 // behavior reviewable in one place.
 
 describe('loadConfig', () => {
+  test('operations-home stays inert unless explicitly enabled', () => {
+    const cfg = loadConfig({
+      OPERATIONS_HOME_SNAPSHOT_PATH: 'not-an-absolute-path',
+      OPERATIONS_HOME_SNAPSHOT_UID: 'not-a-uid',
+    });
+    assert.equal(cfg.modules.operationsHome.snapshotPath, '');
+  });
+
+  test('operations-home binds an explicit safe snapshot path and metadata', () => {
+    const cfg = loadConfig({
+      MODULES_ENABLED: 'operations-home',
+      OPERATIONS_HOME_SNAPSHOT_PATH: '/srv/kitflow/operations-home.json',
+      OPERATIONS_HOME_SNAPSHOT_UID: '1001',
+      OPERATIONS_HOME_SNAPSHOT_MODE: '0640',
+      OPERATIONS_HOME_SNAPSHOT_MAX_AGE_SECONDS: '120',
+    });
+    assert.deepEqual(cfg.modules.operationsHome, {
+      snapshotPath: '/srv/kitflow/operations-home.json',
+      expectedUid: 1001,
+      expectedMode: 0o640,
+      maxAgeSeconds: 120,
+      maxBytes: 1024 * 1024,
+    });
+  });
+
+  test('enabled operations-home rejects missing or unsafe metadata', () => {
+    assert.throws(() => loadConfig({ MODULES_ENABLED: 'operations-home' }), /SNAPSHOT_PATH/);
+    assert.throws(
+      () =>
+        loadConfig({
+          MODULES_ENABLED: 'operations-home',
+          OPERATIONS_HOME_SNAPSHOT_PATH: '/srv/kitflow/operations-home.json',
+        }),
+      /SNAPSHOT_UID/,
+    );
+  });
+
   test('cityName defaults to racoon-city for the single-city dashboard', () => {
     const cfg = loadConfig({});
     assert.equal(cfg.cityName, 'racoon-city');
