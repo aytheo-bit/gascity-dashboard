@@ -48,7 +48,8 @@ ProtectControlGroups=true
 RestrictAddressFamilies=AF_UNIX AF_INET
 RestrictNamespaces=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# Node/V8 must create executable JIT pages during isolate startup. Enabling
+# MemoryDenyWriteExecute makes the dashboard trap before it can bind localhost.
 SystemCallArchitectures=native
 
 [Install]
