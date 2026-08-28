@@ -72,44 +72,62 @@ export interface CreateCityRuntimeOptions {
   gc?: GcClient;
 }
 
+interface DashboardRuntimeProjection {
+  dashboardConfig: DashboardRuntimeConfig;
+  enabledFirstPartyIds: ReadonlySet<string>;
+}
+
+/**
+ * Project the city runtime's public configuration once so supervisor-backed
+ * runtimes and explicitly admitted host-local read-only routes cannot drift.
+ */
+export function projectDashboardRuntimeConfig(
+  opts: Pick<CreateCityRuntimeOptions, 'cityName' | 'cityPath' | 'config'>,
+): DashboardRuntimeProjection {
+  const { cityName, cityPath, config } = opts;
+  const enabledFirstPartyIds = resolveEnabledFirstPartyIds(ALL_MODULES, config.enabledModules);
+  return {
+    enabledFirstPartyIds,
+    dashboardConfig: {
+      cityName,
+      cityRoot: cityPath,
+      useFixtures: config.useFixtures,
+      // Project the server's read-only posture (DASHBOARD_READONLY) onto the
+      // wire so the SPA can disable mutating controls (gascity-dashboard-uzhr).
+      // The proxy gate (z8n7) is the enforcement; this is the affordance.
+      readOnly: config.readOnly,
+      // Project the operator identity + decision label onto the wire so the SPA
+      // derives them from /config instead of importing hardcoded literals
+      // (gascity-dashboard-bhvn / zero-hardcoded-roles).
+      operatorAlias: config.operatorAlias,
+      operatorWireAlias: config.operatorWireAlias,
+      decisionLabel: config.decisionLabel,
+      // Always emit the explicit resolved firstParty id list (possibly empty)
+      // so the wire is unambiguous and the frontend filter never has to guess
+      // what an unset env meant. Core-only default surfaces as `[]`.
+      enabledModules: [...enabledFirstPartyIds],
+      defaultView: config.defaultView,
+      ...(enabledFirstPartyIds.has('maintainer')
+        ? {
+            maintainer: {
+              slingTarget: config.modules.maintainer.slingTarget,
+              triageTarget: config.modules.maintainer.triageTarget,
+            },
+          }
+        : {}),
+    },
+  };
+}
+
 export function createCityRuntime(opts: CreateCityRuntimeOptions): CityRuntime {
   const { cityName, cityPath, config } = opts;
   const gc = opts.gc ?? new GcClient({ baseUrl: config.gcSupervisorUrl, cityName });
 
   // Resolve mounted modules once so /config and the mount loop cannot drift.
-  const enabledFirstPartyIds = resolveEnabledFirstPartyIds(ALL_MODULES, config.enabledModules);
+  const { dashboardConfig, enabledFirstPartyIds } = projectDashboardRuntimeConfig(opts);
   const mountedModules = ALL_MODULES.filter(
     (m) => m.kind === 'core' || enabledFirstPartyIds.has(m.id),
   );
-
-  const dashboardConfig: DashboardRuntimeConfig = {
-    cityName,
-    cityRoot: cityPath,
-    useFixtures: config.useFixtures,
-    // Project the server's read-only posture (DASHBOARD_READONLY) onto the
-    // wire so the SPA can disable mutating controls (gascity-dashboard-uzhr).
-    // The proxy gate (z8n7) is the enforcement; this is the affordance.
-    readOnly: config.readOnly,
-    // Project the operator identity + decision label onto the wire so the SPA
-    // derives them from /config instead of importing hardcoded literals
-    // (gascity-dashboard-bhvn / zero-hardcoded-roles).
-    operatorAlias: config.operatorAlias,
-    operatorWireAlias: config.operatorWireAlias,
-    decisionLabel: config.decisionLabel,
-    // Always emit the explicit resolved firstParty id list (possibly empty)
-    // so the wire is unambiguous and the frontend filter never has to guess
-    // what an unset env meant. Core-only default surfaces as `[]`.
-    enabledModules: [...enabledFirstPartyIds],
-    defaultView: config.defaultView,
-    ...(enabledFirstPartyIds.has('maintainer')
-      ? {
-          maintainer: {
-            slingTarget: config.modules.maintainer.slingTarget,
-            triageTarget: config.modules.maintainer.triageTarget,
-          },
-        }
-      : {}),
-  };
 
   // cityDataDir derives from the VALIDATED cityName segment (never from the
   // untrusted supervisor host path). The cityName has already passed

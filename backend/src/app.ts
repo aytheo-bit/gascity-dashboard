@@ -15,6 +15,7 @@ import { clientErrorsRouter } from './routes/client-errors.js';
 import { healthRouter } from './routes/health.js';
 import { supervisorTransportProxy } from './routes/supervisor-transport-proxy.js';
 import { createCityRegistry, supervisorCityLister, type CityRegistry } from './city/registry.js';
+import { projectDashboardRuntimeConfig } from './city/runtime.js';
 import { cityDispatch } from './middleware/city-dispatch.js';
 import { LOG_COMPONENT, errorMessage, logInfo, logWarn } from './logging.js';
 import { readOperationsHomeSnapshot } from './views/modules/operations-home/reader.js';
@@ -91,12 +92,30 @@ export function createDashboardApp(config: AdminConfig): DashboardApp {
   // explicitly enabled on the configured default city in a read-only
   // deployment, serving it must not depend on a Gas City supervisor being
   // active. Every other city/module route remains behind cityDispatch.
+  const localOperationsHomeEnabled = (cityName: string): boolean =>
+    config.readOnly &&
+    config.enabledModules?.has('operations-home') === true &&
+    cityName === config.cityName;
+
+  // The SPA filters first-party routes from the same runtime config served by
+  // a supervisor-backed CityRuntime. Project that exact wire shape locally so
+  // the admitted Operations Home view can register while no supervisor is up.
+  app.get('/api/city/:cityName/config', (req, res, next) => {
+    if (!localOperationsHomeEnabled(req.params.cityName)) {
+      next();
+      return;
+    }
+    res.json(
+      projectDashboardRuntimeConfig({
+        cityName: config.cityName,
+        cityPath: config.cityPath,
+        config,
+      }).dashboardConfig,
+    );
+  });
+
   app.all('/api/city/:cityName/operations-home', async (req, res, next) => {
-    const localSnapshotEnabled =
-      config.readOnly &&
-      config.enabledModules?.has('operations-home') === true &&
-      req.params.cityName === config.cityName;
-    if (!localSnapshotEnabled) {
+    if (!localOperationsHomeEnabled(req.params.cityName)) {
       next();
       return;
     }

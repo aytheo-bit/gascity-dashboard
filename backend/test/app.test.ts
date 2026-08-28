@@ -241,7 +241,9 @@ describe('createDashboardApp', () => {
   });
 
   test('serves the explicitly enabled default-city Operations Home snapshot without a supervisor', async () => {
-    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'operations-home-app-')));
+    const directory = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'operations-home-app-')),
+    );
     const snapshotPath = path.join(directory, 'operations-home.json');
     await fs.writeFile(
       snapshotPath,
@@ -314,8 +316,101 @@ describe('createDashboardApp', () => {
     }
   });
 
+  test('serves byte-identical runtime config for the admitted local Operations Home city', async () => {
+    const config = makeConfig({
+      cityPath: '/srv/local/test-city',
+      readOnly: true,
+      enabledModules: new Set(['operations-home']),
+      defaultView: 'operations-home',
+    });
+    const { app, runtime } = createDashboardApp(config);
+    runtime.start();
+    try {
+      await withApp(app, async (url) => {
+        const response = await fetch(`${url}/api/city/test-city/config`);
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), {
+          cityName: 'test-city',
+          cityRoot: '/srv/local/test-city',
+          useFixtures: false,
+          readOnly: true,
+          operatorAlias: 'operator',
+          operatorWireAlias: 'human',
+          decisionLabel: 'needs/operator',
+          enabledModules: ['operations-home'],
+          defaultView: 'operations-home',
+        });
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  test('local runtime config remains supervisor and security gated outside the exact admission', async () => {
+    const cases: Array<{ config: AdminConfig; city: string }> = [
+      {
+        config: makeConfig({ readOnly: true, enabledModules: null }),
+        city: 'test-city',
+      },
+      {
+        config: makeConfig({
+          readOnly: false,
+          enabledModules: new Set(['operations-home']),
+        }),
+        city: 'test-city',
+      },
+      {
+        config: makeConfig({
+          readOnly: true,
+          enabledModules: new Set(['operations-home']),
+        }),
+        city: 'other-city',
+      },
+    ];
+
+    for (const item of cases) {
+      const { app, runtime } = createDashboardApp(item.config);
+      runtime.start();
+      try {
+        await withApp(app, async (url) => {
+          const response = await fetch(`${url}/api/city/${item.city}/config`);
+          assert.ok(response.status === 502 || response.status === 504);
+        });
+      } finally {
+        await runtime.stop();
+      }
+    }
+
+    const admitted = makeConfig({
+      readOnly: true,
+      enabledModules: new Set(['operations-home']),
+    });
+    const { app, runtime } = createDashboardApp(admitted);
+    runtime.start();
+    try {
+      await withApp(app, async (url) => {
+        const csrf = await fetch(`${url}/api/csrf`);
+        const csrfBody = (await csrf.json()) as { token: string };
+        const response = await fetch(`${url}/api/city/test-city/config`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: 'http://127.0.0.1:8081',
+            'x-csrf-token': csrfBody.token,
+          },
+          body: '{}',
+        });
+        assert.ok(response.status === 502 || response.status === 504);
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   test('local Operations Home bypass remains fail closed for controls, invalid snapshots, and other cities', async () => {
-    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'operations-home-app-')));
+    const directory = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'operations-home-app-')),
+    );
     const snapshotPath = path.join(directory, 'operations-home.json');
     await fs.writeFile(snapshotPath, '{', { mode: 0o600 });
     await fs.chmod(snapshotPath, 0o600);
