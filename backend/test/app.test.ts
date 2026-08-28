@@ -2,6 +2,9 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import http, { type Server } from 'node:http';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { Express } from 'express';
 import type { AdminConfig } from '../src/config.js';
 import { createDashboardApp } from '../src/app.js';
@@ -234,6 +237,156 @@ describe('createDashboardApp', () => {
       });
     } finally {
       await runtime.stop();
+    }
+  });
+
+  test('serves the explicitly enabled default-city Operations Home snapshot without a supervisor', async () => {
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'operations-home-app-')));
+    const snapshotPath = path.join(directory, 'operations-home.json');
+    await fs.writeFile(
+      snapshotPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        mode: 'read-only',
+        generatedAt: Date.now() / 1000 - 1,
+        overall: { status: 'ready', icon: '+', label: 'Ready' },
+        needsAttention: [],
+        work: {
+          countsTrusted: true,
+          active: 0,
+          inFlight: 0,
+          reported: 0,
+          capacity: { label: 'Available' },
+        },
+        services: [],
+        controls: [],
+      }),
+      { mode: 0o600 },
+    );
+    await fs.chmod(snapshotPath, 0o600);
+    const config = makeConfig({
+      readOnly: true,
+      enabledModules: new Set(['operations-home']),
+      modules: {
+        ...makeConfig().modules,
+        operationsHome: {
+          snapshotPath,
+          expectedUid: process.getuid!(),
+          expectedMode: 0o600,
+          maxAgeSeconds: 60,
+          maxBytes: 1024 * 1024,
+        },
+      },
+    });
+    const { app, runtime } = createDashboardApp(config);
+    runtime.start();
+    try {
+      await withApp(app, async (url) => {
+        const response = await fetch(`${url}/api/city/test-city/operations-home`);
+        assert.equal(response.status, 200);
+        const body = (await response.json()) as {
+          availability?: string;
+          mode?: string;
+          generatedAt?: number;
+          controls?: unknown[];
+        };
+        assert.deepEqual(body, {
+          availability: 'available',
+          schemaVersion: 1,
+          mode: 'read-only',
+          generatedAt: body.generatedAt,
+          overall: { status: 'ready', icon: '+', label: 'Ready' },
+          needsAttention: [],
+          work: {
+            countsTrusted: true,
+            active: 0,
+            inFlight: 0,
+            reported: 0,
+            capacityLabel: 'Available',
+          },
+          services: [],
+          controls: [],
+        });
+      });
+    } finally {
+      await runtime.stop();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('local Operations Home bypass remains fail closed for controls, invalid snapshots, and other cities', async () => {
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'operations-home-app-')));
+    const snapshotPath = path.join(directory, 'operations-home.json');
+    await fs.writeFile(snapshotPath, '{', { mode: 0o600 });
+    await fs.chmod(snapshotPath, 0o600);
+    const config = makeConfig({
+      readOnly: true,
+      enabledModules: new Set(['operations-home']),
+      modules: {
+        ...makeConfig().modules,
+        operationsHome: {
+          snapshotPath,
+          expectedUid: process.getuid!(),
+          expectedMode: 0o600,
+          maxAgeSeconds: 60,
+          maxBytes: 1024 * 1024,
+        },
+      },
+    });
+    const { app, runtime } = createDashboardApp(config);
+    runtime.start();
+    try {
+      await withApp(app, async (url) => {
+        const invalid = await fetch(`${url}/api/city/test-city/operations-home`);
+        assert.equal(invalid.status, 503);
+        assert.deepEqual(await invalid.json(), {
+          availability: 'unavailable',
+          reason: 'snapshot-invalid',
+          controls: [],
+        });
+
+        const csrf = await fetch(`${url}/api/csrf`);
+        const csrfBody = (await csrf.json()) as { token: string };
+        const control = await fetch(`${url}/api/city/test-city/operations-home`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: 'http://127.0.0.1:8081',
+            'x-csrf-token': csrfBody.token,
+          },
+          body: '{}',
+        });
+        assert.equal(control.status, 405);
+        assert.equal(control.headers.get('allow'), 'GET, HEAD');
+        assert.deepEqual(await control.json(), {
+          error: 'method not allowed',
+          kind: 'read-only',
+        });
+
+        const otherCity = await fetch(`${url}/api/city/other-city/operations-home`);
+        assert.ok(otherCity.status === 502 || otherCity.status === 504);
+      });
+    } finally {
+      await runtime.stop();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('disabled or writable Operations Home never bypasses supervisor city dispatch', async () => {
+    for (const config of [
+      makeConfig({ readOnly: true, enabledModules: null }),
+      makeConfig({ readOnly: false, enabledModules: new Set(['operations-home']) }),
+    ]) {
+      const { app, runtime } = createDashboardApp(config);
+      runtime.start();
+      try {
+        await withApp(app, async (url) => {
+          const response = await fetch(`${url}/api/city/test-city/operations-home`);
+          assert.ok(response.status === 502 || response.status === 504);
+        });
+      } finally {
+        await runtime.stop();
+      }
     }
   });
 

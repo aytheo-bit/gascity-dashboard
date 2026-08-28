@@ -17,6 +17,7 @@ import { supervisorTransportProxy } from './routes/supervisor-transport-proxy.js
 import { createCityRegistry, supervisorCityLister, type CityRegistry } from './city/registry.js';
 import { cityDispatch } from './middleware/city-dispatch.js';
 import { LOG_COMPONENT, errorMessage, logInfo, logWarn } from './logging.js';
+import { readOperationsHomeSnapshot } from './views/modules/operations-home/reader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -85,6 +86,28 @@ export function createDashboardApp(config: AdminConfig): DashboardApp {
   globalRouter.use('/builds', buildsRouter());
   globalRouter.use('/client-errors', clientErrorsRouter());
   app.use('/api', globalRouter);
+
+  // Operations Home is a host-local, read-only snapshot. When that module is
+  // explicitly enabled on the configured default city in a read-only
+  // deployment, serving it must not depend on a Gas City supervisor being
+  // active. Every other city/module route remains behind cityDispatch.
+  app.all('/api/city/:cityName/operations-home', async (req, res, next) => {
+    const localSnapshotEnabled =
+      config.readOnly &&
+      config.enabledModules?.has('operations-home') === true &&
+      req.params.cityName === config.cityName;
+    if (!localSnapshotEnabled) {
+      next();
+      return;
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.setHeader('Allow', 'GET, HEAD');
+      res.status(405).json({ error: 'method not allowed', kind: 'read-only' });
+      return;
+    }
+    const snapshot = await readOperationsHomeSnapshot(config.modules.operationsHome);
+    res.status(snapshot.availability === 'available' ? 200 : 503).json(snapshot);
+  });
 
   // ── Per-city request plane ──────────────────────────────────────────────
   // Every city-scoped read/write/stream rides /api/city/:cityName/*. The
