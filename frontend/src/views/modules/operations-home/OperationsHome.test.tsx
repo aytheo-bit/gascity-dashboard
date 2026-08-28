@@ -27,6 +27,21 @@ describe('OperationsHomePage', () => {
           inFlight: 2,
           reported: 3,
           capacityLabel: '2 available of 4',
+          items: [
+            {
+              workId: 'KitFlowApp-42hk.44',
+              displayId: 'ContentBuild Linux port',
+              outcome: 'active',
+              lastProgressAt: 95,
+              lastProgressLabel: '5s ago',
+              receiptCount: 3,
+              laneId: 'contentbuild-a2',
+              beadId: 'KitFlowApp-42hk.44',
+              attemptRef: 'attempt-42856fc',
+              sessionRef: 'nodea-claude-1',
+              agentRef: 'tier2-contentbuild',
+            },
+          ],
         },
         services: [
           {
@@ -46,11 +61,59 @@ describe('OperationsHomePage', () => {
     render(<OperationsHomePage />);
     expect(await screen.findByText('Nothing currently needs attention.')).toBeTruthy();
     expect(screen.getByText('2 available of 4')).toBeTruthy();
+    expect(screen.getByText('ContentBuild Linux port')).toBeTruthy();
+    expect(screen.getByText(/Lane contentbuild-a2/)).toBeTruthy();
+    expect(screen.getByText(/Bead KitFlowApp-42hk\.44/)).toBeTruthy();
+    expect(screen.getByText(/Session nodea-claude-1/)).toBeTruthy();
+    expect(screen.getByText(/Agent tier2-contentbuild/)).toBeTruthy();
     expect(screen.getByText(/No operational controls\./)).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/city/test-city/operations-home',
       expect.any(Object),
     );
+  });
+
+  it('states when session and agent identity are unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          availability: 'available',
+          schemaVersion: 1,
+          mode: 'read-only',
+          generatedAt: 100,
+          overall: { status: 'ready', icon: '+', label: 'Ready' },
+          needsAttention: [],
+          work: {
+            countsTrusted: true,
+            active: 1,
+            inFlight: 1,
+            reported: 1,
+            capacityLabel: 'Not reported',
+            items: [
+              {
+                workId: 'contentbuild-a2',
+                displayId: 'contentbuild-a2',
+                outcome: 'active',
+                lastProgressAt: 95,
+                lastProgressLabel: '5s ago',
+                receiptCount: null,
+                laneId: 'contentbuild-a2',
+                beadId: null,
+                attemptRef: 'attempt-42856fc',
+                sessionRef: null,
+                agentRef: null,
+              },
+            ],
+          },
+          services: [],
+          controls: [],
+        }),
+      }),
+    );
+    render(<OperationsHomePage />);
+    expect(await screen.findByText(/Session unavailable/)).toBeTruthy();
+    expect(screen.getByText(/Agent unavailable/)).toBeTruthy();
   });
 
   it('fails closed when the snapshot is unavailable', async () => {

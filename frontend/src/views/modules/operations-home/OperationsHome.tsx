@@ -80,6 +80,26 @@ export function OperationsHomePage() {
             <Metric label="Reported" value={count(snapshot.work.reported)} />
             <Metric label="Capacity" value={snapshot.work.capacityLabel} />
           </dl>
+          {snapshot.work.items.length === 0 ? (
+            <p className="mt-6 text-body text-fg-muted">No lifecycle work is currently reported.</p>
+          ) : (
+            <ul className="mt-6 divide-y divide-rule">
+              {snapshot.work.items.map((item, index) => (
+                <li
+                  key={`${item.workId}:${item.attemptRef ?? 'unknown-attempt'}:${index}`}
+                  className="py-4"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                    <span className="text-title font-medium text-fg">{item.displayId}</span>
+                    <span className="text-label uppercase tracking-wider text-fg-muted">
+                      {item.outcome}; progress {item.lastProgressLabel}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-body text-fg-muted">{identitySummary(item)}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
         <section aria-labelledby="operations-services">
           <h2 id="operations-services" className="text-title font-semibold text-fg mb-4">
@@ -116,6 +136,19 @@ function Metric({ label, value }: { label: string; value: string }) {
       <dd className="mt-1 text-body text-fg">{value}</dd>
     </div>
   );
+}
+
+function identitySummary(
+  item: Extract<OperationsHomeResponse, { availability: 'available' }>['work']['items'][number],
+): string {
+  return [
+    `Lane ${item.laneId ?? 'unavailable'}`,
+    `Bead ${item.beadId ?? 'unavailable'}`,
+    `Attempt ${item.attemptRef ?? 'unavailable'}`,
+    `Session ${item.sessionRef ?? 'unavailable'}`,
+    `Agent ${item.agentRef ?? 'unavailable'}`,
+    `Receipts ${item.receiptCount ?? 'unavailable'}`,
+  ].join('; ');
 }
 function count(value: number | null): string {
   return value === null ? 'Not proven' : String(value);
