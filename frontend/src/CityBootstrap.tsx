@@ -48,6 +48,50 @@ type BootstrapState =
   | { phase: 'error'; message: string }
   | { phase: 'empty' };
 
+interface BootstrapCitySources {
+  fetchLocalCity: (path: string) => Promise<Response>;
+  listSupervisorCities: () => Promise<{ items?: Array<{ name: string }> | null }>;
+}
+
+const DEFAULT_BOOTSTRAP_SOURCES: BootstrapCitySources = {
+  fetchLocalCity: (path) => fetch(path),
+  listSupervisorCities: () => supervisorApi().listCities(),
+};
+
+/**
+ * Resolve the city for a bare dashboard URL without letting registry order
+ * override an explicitly admitted host-local Operations Home city.
+ *
+ * A 404 means the deployment has no such local admission and preserves the
+ * normal multi-city supervisor behavior. Any present-but-malformed local
+ * admission fails closed rather than silently displaying another city.
+ */
+export async function resolveBootstrapCity(
+  sources: BootstrapCitySources = DEFAULT_BOOTSTRAP_SOURCES,
+): Promise<string | null> {
+  const localResponse = await sources.fetchLocalCity('/api/operations-home-city');
+  if (localResponse.status !== 404) {
+    if (!localResponse.ok) {
+      throw new Error(`local Operations Home city lookup failed (${localResponse.status})`);
+    }
+    const value: unknown = await localResponse.json();
+    const cityName =
+      typeof value === 'object' && value !== null && 'cityName' in value
+        ? (value as { cityName?: unknown }).cityName
+        : undefined;
+    if (typeof cityName !== 'string' || !CITY_NAME_RE.test(cityName)) {
+      throw new Error('invalid local Operations Home city');
+    }
+    return cityName;
+  }
+
+  const list = await sources.listSupervisorCities();
+  const cityName = list.items?.[0]?.name;
+  if (cityName === undefined) return null;
+  if (!CITY_NAME_RE.test(cityName)) throw new Error('invalid supervisor city');
+  return cityName;
+}
+
 export function CityBootstrap() {
   const parsed = parseCityFromPath(window.location.pathname);
   const [state, setState] = useState<BootstrapState>({ phase: 'loading' });
@@ -55,18 +99,16 @@ export function CityBootstrap() {
   useEffect(() => {
     if (parsed !== null) return; // city already resolved from the URL
     let cancelled = false;
-    supervisorApi()
-      .listCities()
-      .then((list) => {
+    void resolveBootstrapCity()
+      .then((cityName) => {
         if (cancelled) return;
-        const first = list.items?.[0];
-        if (first === undefined) {
+        if (cityName === null) {
           setState({ phase: 'empty' });
           return;
         }
         // Full navigation (not client-side) so the app remounts under the
         // chosen city's basename with the active city set deterministically.
-        window.location.replace(`/city/${encodeURIComponent(first.name)}/`);
+        window.location.replace(`/city/${encodeURIComponent(cityName)}/`);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

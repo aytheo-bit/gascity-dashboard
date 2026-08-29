@@ -97,6 +97,19 @@ export function createDashboardApp(config: AdminConfig): DashboardApp {
     config.enabledModules?.has('operations-home') === true &&
     cityName === config.cityName;
 
+  // A bare dashboard URL normally selects the supervisor registry's first
+  // city.  A host-local Operations Home deployment has a stricter admitted
+  // city identity, which may not be first in that registry.  Advertise only
+  // that public city name so the SPA can enter the already-admitted request
+  // plane without guessing or exposing any host path/configuration.
+  app.get('/api/operations-home-city', (_req, res, next) => {
+    if (!localOperationsHomeEnabled(config.cityName)) {
+      next();
+      return;
+    }
+    res.json({ cityName: config.cityName });
+  });
+
   // The SPA filters first-party routes from the same runtime config served by
   // a supervisor-backed CityRuntime. Project that exact wire shape locally so
   // the admitted Operations Home view can register while no supervisor is up.

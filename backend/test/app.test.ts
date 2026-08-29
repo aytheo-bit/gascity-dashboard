@@ -259,6 +259,7 @@ describe('createDashboardApp', () => {
           inFlight: 0,
           reported: 0,
           capacity: { label: 'Available' },
+          items: [],
         },
         services: [],
         controls: [],
@@ -305,6 +306,7 @@ describe('createDashboardApp', () => {
             inFlight: 0,
             reported: 0,
             capacityLabel: 'Available',
+            items: [],
           },
           services: [],
           controls: [],
@@ -343,6 +345,41 @@ describe('createDashboardApp', () => {
       });
     } finally {
       await runtime.stop();
+    }
+  });
+
+  test('advertises the admitted local Operations Home city for bare-root bootstrap', async () => {
+    const admitted = makeConfig({
+      cityName: 'kitflow-node-a',
+      readOnly: true,
+      enabledModules: new Set(['operations-home']),
+    });
+    const { app, runtime } = createDashboardApp(admitted);
+    runtime.start();
+    try {
+      await withApp(app, async (url) => {
+        const response = await fetch(`${url}/api/operations-home-city`);
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { cityName: 'kitflow-node-a' });
+      });
+    } finally {
+      await runtime.stop();
+    }
+
+    for (const config of [
+      makeConfig({ readOnly: true, enabledModules: null }),
+      makeConfig({ readOnly: false, enabledModules: new Set(['operations-home']) }),
+    ]) {
+      const deployment = createDashboardApp(config);
+      deployment.runtime.start();
+      try {
+        await withApp(deployment.app, async (url) => {
+          const response = await fetch(`${url}/api/operations-home-city`);
+          assert.equal(response.status, 404);
+        });
+      } finally {
+        await deployment.runtime.stop();
+      }
     }
   });
 
