@@ -116,6 +116,46 @@ describe('OperationsHomePage', () => {
     expect(screen.getByText(/Agent unavailable/)).toBeTruthy();
   });
 
+  it('renders degraded readiness as an explicit warning state', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          availability: 'available',
+          schemaVersion: 1,
+          mode: 'read-only',
+          generatedAt: 100,
+          overall: { status: 'degraded', icon: '~', label: 'Degraded' },
+          needsAttention: [],
+          work: {
+            countsTrusted: false,
+            active: null,
+            inFlight: null,
+            reported: null,
+            capacityLabel: 'Not reported',
+            items: [],
+          },
+          services: [
+            {
+              source: 'providers',
+              title: 'Provider pools',
+              status: 'degraded',
+              icon: '~',
+              label: 'Degraded',
+              explanation: 'At least one provider pool is unavailable.',
+              freshnessLabel: '5s old',
+            },
+          ],
+          controls: [],
+        }),
+      }),
+    );
+    render(<OperationsHomePage />);
+    const degraded = await screen.findByText('Degraded');
+    expect(degraded.parentElement?.className).toContain('text-warn');
+    expect(screen.getByText('Provider pools').parentElement?.className).toContain('text-warn');
+  });
+
   it('fails closed when the snapshot is unavailable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     render(<OperationsHomePage />);

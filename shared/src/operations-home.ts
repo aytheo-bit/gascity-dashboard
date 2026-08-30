@@ -1,4 +1,10 @@
-export type OperationsHomeStatus = 'ready' | 'blocked' | 'failed' | 'stale' | 'unknown';
+export type OperationsHomeStatus =
+  | 'ready'
+  | 'blocked'
+  | 'failed'
+  | 'stale'
+  | 'unknown'
+  | 'degraded';
 
 export interface OperationsHomeStatusView {
   status: OperationsHomeStatus;

@@ -20,13 +20,21 @@ export interface OperationsHomeReaderOptions {
   now?: () => number;
 }
 
-const STATUSES = new Set<OperationsHomeStatus>(['ready', 'blocked', 'failed', 'stale', 'unknown']);
+const STATUSES = new Set<OperationsHomeStatus>([
+  'ready',
+  'blocked',
+  'failed',
+  'stale',
+  'unknown',
+  'degraded',
+]);
 const STATUS_PRESENTATION: Record<OperationsHomeStatus, { icon: string; label: string }> = {
   ready: { icon: '+', label: 'Ready' },
   blocked: { icon: '!', label: 'Blocked' },
   failed: { icon: 'x', label: 'Failed' },
   stale: { icon: '~', label: 'Stale' },
   unknown: { icon: '?', label: 'Unknown' },
+  degraded: { icon: '~', label: 'Degraded' },
 };
 const ATTENTION_KINDS = new Set(['service', 'readiness', 'workstream']);
 const WORK_OUTCOMES = new Set<OperationsHomeWorkOutcome>([

@@ -158,7 +158,7 @@ function tone(status: OperationsHomeStatus): StatusTone {
     ? 'ok'
     : status === 'blocked' || status === 'failed'
       ? 'stuck'
-      : status === 'stale'
+      : status === 'stale' || status === 'degraded'
         ? 'warn'
         : 'neutral';
 }

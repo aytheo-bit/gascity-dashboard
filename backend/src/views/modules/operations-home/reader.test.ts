@@ -102,6 +102,30 @@ describe('operations-home snapshot reader', () => {
     ]);
   });
 
+  test('accepts the producer degraded state with its exact presentation', async () => {
+    const degraded = fixture();
+    degraded.overall = { status: 'degraded', icon: '~', label: 'Degraded' };
+    const services = degraded.services as Array<Record<string, unknown>>;
+    services[0] = {
+      ...services[0],
+      status: 'degraded',
+      icon: '~',
+      label: 'Degraded',
+    };
+    await write(degraded);
+
+    const result = await readOperationsHomeSnapshot(options());
+    assert.equal(result.availability, 'available');
+    if (result.availability !== 'available') assert.fail('snapshot should be available');
+    assert.equal(result.overall.status, 'degraded');
+    assert.equal(result.services[0]?.status, 'degraded');
+
+    services[0]!.label = 'Ready';
+    await write(degraded);
+    const rejected = await readOperationsHomeSnapshot(options());
+    assert.equal(rejected.availability, 'unavailable');
+  });
+
   test('preserves unavailable live identity as null and rejects malformed identity', async () => {
     const missing = fixture();
     const missingWork = missing.work as { items: Array<Record<string, unknown>> };
