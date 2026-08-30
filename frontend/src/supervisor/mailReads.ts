@@ -47,13 +47,19 @@ export async function listSupervisorMail(
   const cityName = activeCityOrThrow('list supervisor mail');
   const mailList = await supervisorApi().listMail(cityName, { limit });
   const rawItems = mailList.items ?? [];
+  const upstreamTotal = mailList.total;
   const filtered = filterByClockWindow(filterByBox(rawItems, box, alias, operator), window, nowMs);
   filtered.sort(sortNewestFirst);
   return {
     ...mailList,
     items: filtered,
     total: filtered.length,
-    upstream_total: rawItems.length,
+    partial:
+      mailList.partial === true ||
+      (mailList.next_cursor?.length ?? 0) > 0 ||
+      (mailList.partial_errors?.length ?? 0) > 0 ||
+      upstreamTotal > rawItems.length,
+    upstream_total: upstreamTotal,
     upstream_fetched: rawItems.length,
     fetch_limit: limit,
   };
