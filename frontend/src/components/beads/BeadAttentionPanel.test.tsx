@@ -91,6 +91,7 @@ describe('BeadAttentionPanel (gascity-dashboard-2j8e.3)', () => {
           decisionLabel: 'needs/stephanie',
           nowMs: Date.parse('2026-06-07T12:00:00.000Z'),
           items: [
+            // Ordinary unclaimed backlog — excluded from both badge and page.
             bead({ id: 'B-ready', status: 'open', created_at: '2026-06-04T11:00:00.000Z' }),
             // plain dependency-blocked — excluded from both badge and page.
             bead({ id: 'B-dep', status: 'blocked' }),
@@ -104,7 +105,7 @@ describe('BeadAttentionPanel (gascity-dashboard-2j8e.3)', () => {
     );
     const summary = model.byDomain.beads;
     const navTotal = summary.attention + summary.watch;
-    expect(navTotal).toBe(3);
+    expect(navTotal).toBe(2);
 
     render(<BeadAttentionPanel items={summary.items} onOpen={noop} />);
 

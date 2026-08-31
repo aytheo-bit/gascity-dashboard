@@ -117,11 +117,10 @@ export function deriveBeadsAttention(
     items.push(mayorDecisionAttention(decision));
   }
   const nowMs = facts.nowMs ?? Date.now();
-  // gascity-dashboard-2j8e.3: the Beads badge counts exactly the ready-unclaimed
-  // + abnormally-blocked (escalated / help-requested) set — plain
-  // dependency-blocked is excluded (bd `blocked` = "blocked by a dependency",
-  // working-as-intended queuing). Ready-unclaimed comes from the general list;
-  // escalations from the dedicated gc:escalation queue (the general list drops
+  // The Beads badge counts only explicit operator requests: abnormally-blocked
+  // escalations / help requests. Ordinary unclaimed and dependency-blocked
+  // Beads are queue state and must not become implicit human work. Escalations
+  // come from the dedicated gc:escalation queue (the general list drops
   // gc:-labelled beads). Marker beads surface via the decision queue above, so
   // skip them in the general list (no double-surfacing). selectBeadsNeedingAttention
   // is the membership SSOT the /beads page also reads, so the nav badge count
@@ -147,7 +146,7 @@ export function deriveBeadsAttention(
 
 /** The glyph+word noun for a bead-attention reason (DESIGN.md §Status). */
 function beadAttentionWord(reason: BeadAttentionReason): string {
-  return reason === 'escalated' ? 'escalated' : 'unclaimed';
+  return reason;
 }
 
 function beadHref(beadId: string): string {

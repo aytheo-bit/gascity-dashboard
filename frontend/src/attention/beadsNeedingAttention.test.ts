@@ -23,33 +23,25 @@ function select(inputs: { beads?: readonly Bead[]; escalations?: readonly Bead[]
 }
 
 describe('selectBeadsNeedingAttention (gascity-dashboard-2j8e.3)', () => {
-  it('includes a ready-unclaimed bead once it has aged past the watch window', () => {
+  it('does not treat an unclaimed backlog bead as a request for the operator', () => {
     const rows = select({
       beads: [bead({ id: 'B-ready', status: 'open', created_at: '2026-06-05T11:00:00.000Z' })],
     });
-    expect(rows).toEqual([
-      expect.objectContaining({ beadId: 'B-ready', reason: 'ready-unclaimed', severity: 'watch' }),
-    ]);
+    expect(rows).toEqual([]);
   });
 
-  it('surfaces a ready-unclaimed bead under a cased / padded open wire spelling', () => {
-    // readyUnclaimedRow normalizes the status, so a wire-cased 'Open' (or padded
-    // ' open ') is still recognized as claimable work rather than silently dropped.
+  it('does not let status spelling turn unclaimed work into operator attention', () => {
     const rows = select({
       beads: [bead({ id: 'B-cased', status: ' Open ', created_at: '2026-06-05T11:00:00.000Z' })],
     });
-    expect(rows).toEqual([
-      expect.objectContaining({ beadId: 'B-cased', reason: 'ready-unclaimed' }),
-    ]);
+    expect(rows).toEqual([]);
   });
 
-  it('escalates a long-stale ready-unclaimed bead to attention', () => {
+  it('does not turn old unclaimed work into an implicit human escalation', () => {
     const rows = select({
       beads: [bead({ id: 'B-stale', status: 'open', created_at: '2026-06-01T11:00:00.000Z' })],
     });
-    expect(rows[0]).toEqual(
-      expect.objectContaining({ reason: 'ready-unclaimed', severity: 'attention' }),
-    );
+    expect(rows).toEqual([]);
   });
 
   it('does not surface a freshly-filed open bead as noise', () => {
@@ -59,7 +51,7 @@ describe('selectBeadsNeedingAttention (gascity-dashboard-2j8e.3)', () => {
     expect(rows).toEqual([]);
   });
 
-  it('does not surface an assigned open bead as ready-unclaimed', () => {
+  it('does not surface assigned open work', () => {
     const rows = select({
       beads: [
         bead({
@@ -146,14 +138,11 @@ describe('selectBeadsNeedingAttention (gascity-dashboard-2j8e.3)', () => {
     expect(rows).toEqual([]);
   });
 
-  it('combines ready-unclaimed and escalated across both inputs', () => {
+  it('surfaces only the explicit escalation when ordinary backlog is also present', () => {
     const rows = select({
       beads: [bead({ id: 'B-ready', status: 'open', created_at: '2026-06-05T11:00:00.000Z' })],
       escalations: [bead({ id: 'B-esc', status: 'blocked', labels: ['gc:escalation'] })],
     });
-    expect(rows.map((row) => `${row.beadId}:${row.reason}`)).toEqual([
-      'B-esc:escalated',
-      'B-ready:ready-unclaimed',
-    ]);
+    expect(rows.map((row) => `${row.beadId}:${row.reason}`)).toEqual(['B-esc:escalated']);
   });
 });
