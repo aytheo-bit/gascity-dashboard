@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { isPoolWorkerSender, selectOperatorActionableUnread } from 'gas-city-dashboard-shared';
+import {
+  groupOperatorActionableUnread,
+  selectOperatorActionableUnread,
+} from 'gas-city-dashboard-shared';
 import { formatApiError } from '../api/client';
 import { formatMailSender } from '../lib/mailSender';
 import { useCachedData } from '../hooks/useCachedData';
@@ -50,16 +53,6 @@ const MAIL_CHIPS: ReadonlyArray<FilterChip<SupervisorMailItem>> = [
   { id: 'read', label: 'read', match: (m) => m.read },
 ];
 
-// gascity-dashboard-2j8e.5: the operator's "needs you" filter — unread mail
-// minus the pool-worker firehose, the same predicate selectOperatorActionableUnread
-// applies, so the chip surfaces exactly the set the nav badge counts. Operator-only
-// (it is the operator's signal); composed ahead of the read-state chips.
-const NEEDS_YOU_CHIP: FilterChip<SupervisorMailItem> = {
-  id: 'needs-you',
-  label: 'needs you',
-  match: (m) => !m.read && !isPoolWorkerSender(m.from),
-};
-
 const MAIL_SEARCH_FIELDS = (m: SupervisorMailItem): ReadonlyArray<string | undefined> => [
   m.from,
   m.to,
@@ -71,9 +64,36 @@ const MAIL_SEARCH_FIELDS = (m: SupervisorMailItem): ReadonlyArray<string | undef
   m.body.split('\n')[0],
 ];
 
-type MailBox = 'inbox' | 'sent' | 'all';
+type MailBox = 'needs-you' | 'inbox' | 'sent' | 'all';
 type MailAction = 'archive' | 'read' | 'reply' | 'unread';
 const DEEP_LINK_MAIL_HISTORY_LIMIT: MailHistoryLimit = 1000;
+
+interface MailRecurrence {
+  count: number;
+  firstId: string;
+  firstAt: string;
+  latestId: string;
+  latestAt: string;
+}
+
+type PresentedMailItem = SupervisorMailItem & { recurrence?: MailRecurrence };
+
+export function presentNeedsYouMail(
+  items: readonly SupervisorMailItem[],
+): readonly PresentedMailItem[] {
+  return groupOperatorActionableUnread(items).map(({ representative, oldest, count }) => ({
+    ...representative,
+    ...(count > 1 && {
+      recurrence: {
+        count,
+        firstId: oldest.id,
+        firstAt: oldest.created_at,
+        latestId: representative.id,
+        latestAt: representative.created_at,
+      },
+    }),
+  }));
+}
 
 export function MailPage() {
   const attention = useAttentionModel();
@@ -90,7 +110,9 @@ export function MailPage() {
     sessionsUnavailable,
     loadAliases,
   } = useViewingAs();
-  const [box, setBox] = useState<MailBox>(() => (selectedMessageParam === null ? 'inbox' : 'all'));
+  const [box, setBox] = useState<MailBox>(() =>
+    selectedMessageParam === null ? 'needs-you' : 'all',
+  );
   const [historyLimit, setHistoryLimit] = useState<MailHistoryLimit>(() =>
     selectedMessageParam === null ? DEFAULT_MAIL_HISTORY_LIMIT : DEEP_LINK_MAIL_HISTORY_LIMIT,
   );
@@ -113,9 +135,21 @@ export function MailPage() {
     refresh,
   } = useCachedData(
     `mail:${box}:${viewingAs.alias}:${operator.operatorWireAlias}:${historyLimit}:${historyWindow}`,
-    () => listSupervisorMail(box, viewingAs.alias, operator, historyLimit, historyWindow, now),
+    () =>
+      listSupervisorMail(
+        box === 'needs-you' ? 'inbox' : box,
+        viewingAs.alias,
+        operator,
+        historyLimit,
+        historyWindow,
+        now,
+      ),
   );
   const items = useMemo(() => mailData?.items ?? [], [mailData]);
+  const presentedItems = useMemo<readonly PresentedMailItem[]>(
+    () => (box === 'needs-you' ? presentNeedsYouMail(items) : items),
+    [box, items],
+  );
   const [error, setError] = useState<string | null>(null);
   // Surface fetch errors from the cached hook through the same state
   // local handlers use, so the existing error banner keeps working.
@@ -131,6 +165,10 @@ export function MailPage() {
   const [actionInFlight, setActionInFlight] = useState<MailAction | null>(null);
 
   const [composing, setComposing] = useState(false);
+
+  useEffect(() => {
+    if (!viewingAs.isOperator && box === 'needs-you') setBox('inbox');
+  }, [box, viewingAs.isOperator]);
 
   // Bulk read-state selection (gascity-dashboard-mp3g). Lives in component
   // state only; switching mailbox or reading-as identity clears it (different
@@ -222,7 +260,7 @@ export function MailPage() {
     [historyLimit, readOnly, refresh, replyBody, threadFor, viewingAs.alias, operator],
   );
 
-  const columns = useMemo<ReadonlyArray<TableColumn<SupervisorMailItem>>>(
+  const columns = useMemo<ReadonlyArray<TableColumn<PresentedMailItem>>>(
     () => [
       {
         key: 'from',
@@ -245,6 +283,11 @@ export function MailPage() {
             <p className="text-label uppercase tracking-wider text-fg-faint mt-1 truncate">
               {r.body.split('\n')[0] ?? ''}
             </p>
+            {r.recurrence !== undefined && (
+              <p className="text-label uppercase tracking-wider text-accent mt-1 truncate">
+                {r.recurrence.count} repeats · first {formatRelative(r.recurrence.firstAt, now)}
+              </p>
+            )}
           </div>
         ),
       },
@@ -273,14 +316,18 @@ export function MailPage() {
   // the badge agree on the default operator inbox (the badge's canonical
   // source). Only meaningful on the operator's own inbox — it is their signal.
   const needsYou = useMemo(
-    () =>
-      box === 'inbox' && viewingAs.isOperator ? selectOperatorActionableUnread(items).length : 0,
-    [box, items, viewingAs.isOperator],
+    () => (viewingAs.isOperator ? selectOperatorActionableUnread(items).length : 0),
+    [items, viewingAs.isOperator],
   );
 
   const synopsis = useMemo(() => {
-    const noun = box === 'all' ? 'all mail' : box === 'inbox' ? 'inbox' : 'sent';
+    const noun = box === 'all' ? 'all mail' : box === 'needs-you' ? 'needs-you mail' : box;
     if (items.length === 0) return `${capitalize(noun)} empty for ${aliasLabel}.`;
+    if (box === 'needs-you') {
+      return needsYou > 0
+        ? `${presentedItems.length} attention group${presentedItems.length === 1 ? '' : 's'} from ${needsYou} actionable message${needsYou === 1 ? '' : 's'}. Inbox and All preserve every raw message.`
+        : `No mail needs you. Inbox and All preserve every raw message.`;
+    }
     const unread = box === 'sent' ? 0 : items.filter((m) => !m.read).length;
     if (box === 'inbox' && viewingAs.isOperator) {
       // Foreground the needs-you count and name the folded pool-worker firehose
@@ -292,20 +339,15 @@ export function MailPage() {
     }
     if (unread > 0) return `${items.length} in ${noun}, ${unread} unread.`;
     return `${items.length} in ${noun}.`;
-  }, [box, items, aliasLabel, needsYou, viewingAs.isOperator]);
+  }, [box, items, presentedItems.length, aliasLabel, needsYou, viewingAs.isOperator]);
 
-  // The operator gets the needs-you chip ahead of the read-state chips; other
-  // aliases see read-state only (needs-you is the operator's signal).
-  const mailChips = useMemo<ReadonlyArray<FilterChip<SupervisorMailItem>>>(
-    () => (viewingAs.isOperator ? [NEEDS_YOU_CHIP, ...MAIL_CHIPS] : MAIL_CHIPS),
-    [viewingAs.isOperator],
-  );
+  const mailChips = MAIL_CHIPS;
 
   // Mail view key includes box so collapsed-project state is independent
   // between inbox and sent (different mental models).
-  const filters = useListFilters<SupervisorMailItem>({
+  const filters = useListFilters<PresentedMailItem>({
     viewKey: `mail:${box}`,
-    rows: items,
+    rows: presentedItems,
     projectOf: mailProject,
     searchOf: MAIL_SEARCH_FIELDS,
     chips: mailChips,
@@ -313,7 +355,7 @@ export function MailPage() {
 
   // Sent mail has no read-state to manage, so bulk selection is offered only on
   // inbox / all — the same boxes that surface the read-state chips.
-  const selectable = box !== 'sent';
+  const selectable = box !== 'sent' && box !== 'needs-you';
   const visibleRows = useMemo(() => filters.groups.flatMap((g) => g.rows), [filters.groups]);
   const selectedCount = useMemo(
     () => visibleRows.reduce((n, r) => (selectedIds.has(r.id) ? n + 1 : n), 0),
@@ -364,7 +406,7 @@ export function MailPage() {
     [readOnly, visibleRows, selectedIds, refresh],
   );
 
-  const selectColumn = useMemo<TableColumn<SupervisorMailItem>>(
+  const selectColumn = useMemo<TableColumn<PresentedMailItem>>(
     () => ({
       key: '__select',
       label: '',
@@ -389,17 +431,17 @@ export function MailPage() {
   // background tint that made unread mail read as "slightly red". Mail rows
   // render in the neutral foreground; severity is exposed for tooling only.
   const rowProps = useMemo(
-    () => (mail: SupervisorMailItem) =>
+    () => (mail: PresentedMailItem) =>
       attentionDataProps(resourceAttentionSeverity(attention, 'mail', mail.id)),
     [attention],
   );
   const mailSeverity = useCallback(
-    (mail: SupervisorMailItem) => resourceAttentionSeverity(attention, 'mail', mail.id),
+    (mail: PresentedMailItem) => resourceAttentionSeverity(attention, 'mail', mail.id),
     [attention],
   );
 
   // Sent box has no unread concept; suppress those chips there.
-  const visibleChips = box === 'sent' ? [] : mailChips;
+  const visibleChips = box === 'sent' || box === 'needs-you' ? [] : mailChips;
   const replyDisabled =
     readOnly ||
     threadFor === null ||
@@ -456,7 +498,7 @@ export function MailPage() {
 
         <div className="flex-1 min-w-0">
           <div className="mb-6">
-            <BoxTabs box={box} onChange={setBox} />
+            <BoxTabs box={box} onChange={setBox} showNeedsYou={viewingAs.isOperator} />
           </div>
 
           <div className="mb-6 space-y-3">
@@ -465,7 +507,7 @@ export function MailPage() {
               onChange={filters.setSearch}
               placeholder="Search mail by sender, subject, rig"
               matchCount={filters.totalMatches}
-              totalCount={items.length}
+              totalCount={presentedItems.length}
               ariaLabel="Search mail"
             />
             {visibleChips.length > 0 && (
@@ -520,7 +562,7 @@ export function MailPage() {
             emptyMessage={
               filters.search.length > 0 || filters.activeChipIds.size > 0
                 ? 'No messages match the current search or filter.'
-                : `${box === 'inbox' ? 'Inbox' : 'Sent'} empty for ${aliasLabel}.`
+                : `${box === 'needs-you' ? 'Needs you' : capitalize(box)} empty for ${aliasLabel}.`
             }
             perProjectEmpty="No messages in this project."
             initialSort={{ key: 'created_at', dir: 'desc' }}
@@ -610,10 +652,21 @@ export function MailPage() {
   );
 }
 
-function BoxTabs({ box, onChange }: { box: MailBox; onChange: (b: MailBox) => void }) {
+function BoxTabs({
+  box,
+  onChange,
+  showNeedsYou,
+}: {
+  box: MailBox;
+  onChange: (b: MailBox) => void;
+  showNeedsYou: boolean;
+}) {
+  const boxes: MailBox[] = showNeedsYou
+    ? ['needs-you', 'inbox', 'sent', 'all']
+    : ['inbox', 'sent', 'all'];
   return (
     <div className="flex items-baseline gap-6">
-      {(['inbox', 'sent', 'all'] as MailBox[]).map((b) => (
+      {boxes.map((b) => (
         <button
           key={b}
           type="button"
@@ -622,7 +675,7 @@ function BoxTabs({ box, onChange }: { box: MailBox; onChange: (b: MailBox) => vo
             box === b ? 'text-fg font-semibold' : 'text-fg-muted hover:text-fg'
           }`}
         >
-          {b === 'all' ? 'All' : capitalize(b)}
+          {b === 'all' ? 'All' : b === 'needs-you' ? 'Needs you' : capitalize(b)}
         </button>
       ))}
     </div>

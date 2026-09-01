@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setActiveCity } from '../api/cityBase';
 import {
   SupervisorApiError,
   resetSupervisorApiForTests,
@@ -57,6 +58,10 @@ const baseApi: SupervisorApi = {
 };
 
 describe('supervisor mail reads', () => {
+  beforeEach(() => {
+    setActiveCity('test-city');
+  });
+
   afterEach(() => {
     resetSupervisorApiForTests();
   });
@@ -90,6 +95,62 @@ describe('supervisor mail reads', () => {
     await listSupervisorMail('inbox', 'stephanie', operator, 1000);
 
     expect(listMail).toHaveBeenCalledWith('test-city', { limit: 1000 });
+  });
+
+  it('preserves upstream total and marks a limit-truncated mail read partial', async () => {
+    const listMail = vi.fn(async () => ({
+      items: [mail({ id: 'newest' }), mail({ id: 'older' })],
+      total: 178,
+    }));
+    setSupervisorApiForTests({ ...baseApi, listMail });
+
+    const result = await listSupervisorMail('inbox', 'stephanie', operator);
+
+    expect(result.upstream_total).toBe(178);
+    expect(result.upstream_fetched).toBe(2);
+    expect(result.total).toBe(2);
+    expect(result.partial).toBe(true);
+    expect(result.items.map((item) => item.id)).toEqual(['newest', 'older']);
+  });
+
+  it('preserves an authoritative non-partial upstream read', async () => {
+    const listMail = vi.fn(async () => ({
+      items: [mail({ id: 'only' })],
+      total: 1,
+    }));
+    setSupervisorApiForTests({ ...baseApi, listMail });
+
+    const result = await listSupervisorMail('inbox', 'stephanie', operator);
+
+    expect(result.upstream_total).toBe(1);
+    expect(result.upstream_fetched).toBe(1);
+    expect(result.partial).toBe(false);
+  });
+
+  it('marks cursor-truncated and provider-degraded upstream reads partial', async () => {
+    const cursorListMail = vi.fn(async () => ({
+      items: [mail({ id: 'cursor' })],
+      total: 1,
+      next_cursor: 'next-page',
+    }));
+    setSupervisorApiForTests({ ...baseApi, listMail: cursorListMail });
+    await expect(listSupervisorMail('inbox', 'stephanie', operator)).resolves.toMatchObject({
+      partial: true,
+      upstream_total: 1,
+      upstream_fetched: 1,
+    });
+
+    const degradedListMail = vi.fn(async () => ({
+      items: [mail({ id: 'degraded' })],
+      total: 1,
+      partial_errors: ['one rig unavailable'],
+    }));
+    setSupervisorApiForTests({ ...baseApi, listMail: degradedListMail });
+    await expect(listSupervisorMail('inbox', 'stephanie', operator)).resolves.toMatchObject({
+      partial: true,
+      upstream_total: 1,
+      upstream_fetched: 1,
+    });
   });
 
   it('filters fetched supervisor mail by a typed clock window after mailbox projection', async () => {

@@ -1,4 +1,10 @@
-export type OperationsHomeStatus = 'ready' | 'blocked' | 'failed' | 'stale' | 'unknown';
+export type OperationsHomeStatus =
+  | 'ready'
+  | 'blocked'
+  | 'failed'
+  | 'stale'
+  | 'unknown'
+  | 'degraded';
 
 export interface OperationsHomeStatusView {
   status: OperationsHomeStatus;
@@ -20,6 +26,29 @@ export interface OperationsHomeService extends OperationsHomeStatusView {
   freshnessLabel: string;
 }
 
+export type OperationsHomeWorkOutcome =
+  | 'active'
+  | 'waiting'
+  | 'blocked'
+  | 'failed'
+  | 'completed'
+  | 'stalled'
+  | 'unknown';
+
+export interface OperationsHomeWorkItem {
+  workId: string;
+  displayId: string;
+  outcome: OperationsHomeWorkOutcome;
+  lastProgressAt: number | null;
+  lastProgressLabel: string;
+  receiptCount: number | null;
+  laneId: string | null;
+  beadId: string | null;
+  attemptRef: string | null;
+  sessionRef: string | null;
+  agentRef: string | null;
+}
+
 export type OperationsHomeResponse =
   | {
       availability: 'available';
@@ -34,6 +63,7 @@ export type OperationsHomeResponse =
         inFlight: number | null;
         reported: number | null;
         capacityLabel: string;
+        items: OperationsHomeWorkItem[];
       };
       services: OperationsHomeService[];
       controls: [];

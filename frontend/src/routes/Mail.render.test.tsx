@@ -16,6 +16,7 @@ interface FetchCall {
 }
 
 const fetchCalls: FetchCall[] = [];
+let inboxItemsOverride: Record<string, unknown>[] | null = null;
 
 // Stateful read-state overrides so a mark-read/unread POST is reflected by the
 // next mailbox GET — lets the bulk-mark tests assert the needs-you count (the
@@ -62,6 +63,12 @@ function stubFetch() {
         gcRequest: requestHeader(input, init, 'X-GC-Request'),
       });
       if (url === '/gc-supervisor/v0/city/test-city/mail?limit=100') {
+        if (inboxItemsOverride !== null) {
+          return jsonResponse({
+            items: inboxItemsOverride.map(applyReadState),
+            total: inboxItemsOverride.length,
+          });
+        }
         return jsonResponse({
           items: [
             mail({
@@ -284,6 +291,7 @@ function mail(overrides: Record<string, unknown>): Record<string, unknown> {
 beforeEach(() => {
   fetchCalls.length = 0;
   markedRead.clear();
+  inboxItemsOverride = null;
   invalidate('mail');
   stubFetch();
 });
@@ -307,31 +315,77 @@ describe('MailPage supervisor reads', () => {
     expect(screen.queryByText('other inbox')).toBeNull();
   });
 
-  it('foregrounds the operator needs-you count, folding the pool-worker firehose (gascity-dashboard-2j8e.5)', async () => {
+  it('defaults to a grouped needs-you view, folding the pool-worker firehose', async () => {
     renderMailPage();
 
     await screen.findByText('direct supervisor inbox');
-    // Two unread to:human (mayor + a polecat firehose message), but only the
-    // mayor escalation needs the operator — the same count the nav badge shows.
-    expect(screen.getByText(/1 need you of 2 unread/)).toBeTruthy();
+    expect(screen.getByText(/1 attention group from 1 actionable message/)).toBeTruthy();
+    expect(screen.queryByText('worker firehose noise')).toBeNull();
   });
 
-  it('the needs-you chip surfaces operator escalations and hides the firehose (gascity-dashboard-2j8e.5)', async () => {
+  it('keeps an explicit raw Inbox view with every operator-inbox message', async () => {
     renderMailPage();
 
     await screen.findByText('direct supervisor inbox');
-    expect(screen.getByText('worker firehose noise')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'needs you' }));
+    expect(await screen.findByText('direct supervisor inbox')).toBeTruthy();
+    expect(await screen.findByText('worker firehose noise')).toBeTruthy();
+  });
 
-    expect(screen.getByText('direct supervisor inbox')).toBeTruthy();
+  it('renders exact Reaper repeats once by default and exposes every raw row in Inbox', async () => {
+    const repeatedMail = [
+      mail({
+        id: 'reaper-old',
+        subject: 'ESCALATION: Reaper anomalies detected [MEDIUM]',
+        body: 'bulk prune skipped: backup stale',
+        created_at: '2026-06-01T08:00:00Z',
+      }),
+      mail({
+        id: 'reaper-middle',
+        subject: 'ESCALATION: Reaper anomalies detected [MEDIUM]',
+        body: 'bulk prune skipped: backup stale',
+        created_at: '2026-06-01T09:00:00Z',
+      }),
+      mail({
+        id: 'reaper-new',
+        subject: 'ESCALATION: Reaper anomalies detected [MEDIUM]',
+        body: 'bulk prune skipped: backup stale',
+        created_at: '2026-06-01T10:00:00Z',
+      }),
+      mail({
+        id: 'reaper-changed',
+        subject: 'ESCALATION: Reaper anomalies detected [MEDIUM]',
+        body: 'bulk prune skipped: backup path changed',
+        created_at: '2026-06-01T10:30:00Z',
+      }),
+      mail({
+        id: 'pool-noise',
+        from: 'polecat-7',
+        subject: 'worker firehose noise',
+        body: 'not for the operator attention surface',
+        created_at: '2026-06-01T10:45:00Z',
+      }),
+    ];
+    inboxItemsOverride = repeatedMail;
+    renderMailPage();
+
+    expect(await screen.findByText(/3 repeats/)).toBeTruthy();
+    expect(screen.getAllByText('ESCALATION: Reaper anomalies detected [MEDIUM]')).toHaveLength(2);
     expect(screen.queryByText('worker firehose noise')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
+
+    expect(await screen.findByText('worker firehose noise')).toBeTruthy();
+    expect(screen.queryByText(/3 repeats/)).toBeNull();
+    expect(screen.getAllByText('ESCALATION: Reaper anomalies detected [MEDIUM]')).toHaveLength(4);
   });
 
   it('expands mailbox history through the generated supervisor limit query', async () => {
     renderMailPage();
 
     await screen.findByText('direct supervisor inbox');
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
     fireEvent.change(screen.getByLabelText('Mail history limit'), {
       target: { value: '1000' },
     });
@@ -594,6 +648,8 @@ describe('MailPage bulk read-state selection (gascity-dashboard-mp3g)', () => {
   it('select-all selects the whole visible set, and rows toggle independently', async () => {
     renderMailPage();
     await screen.findByText('direct supervisor inbox');
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
+    await screen.findByText('worker firehose noise');
 
     const selectAll = screen.getByRole('checkbox', { name: 'select all mail' });
     fireEvent.click(selectAll);
@@ -612,6 +668,8 @@ describe('MailPage bulk read-state selection (gascity-dashboard-mp3g)', () => {
   it('bulk-marks the selected inbox mail read through the supervisor API', async () => {
     renderMailPage();
     await screen.findByText('direct supervisor inbox');
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
+    await screen.findByText('worker firehose noise');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'select all mail' }));
     fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
@@ -664,7 +722,9 @@ describe('MailPage bulk read-state selection (gascity-dashboard-mp3g)', () => {
 
   it('updates the needs-you count after a bulk mark-read (same selector as the nav badge)', async () => {
     renderMailPage();
-    await screen.findByText(/1 need you of 2 unread/);
+    await screen.findByText(/1 attention group from 1 actionable message/);
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
+    await screen.findByText('worker firehose noise');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'select all mail' }));
     fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
@@ -685,6 +745,8 @@ describe('MailPage bulk read-state selection (gascity-dashboard-mp3g)', () => {
   it('disables the bulk mark actions in read-only mode', async () => {
     renderMailPage('/mail', { readOnly: true });
     await screen.findByText('direct supervisor inbox');
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
+    await screen.findByText('worker firehose noise');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'select all mail' }));
     expect((screen.getByRole('button', { name: 'Mark read' }) as HTMLButtonElement).disabled).toBe(

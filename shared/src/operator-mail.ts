@@ -23,6 +23,24 @@ export interface OperatorMailItem {
   readonly created_at: string;
 }
 
+/** Fields used only to collapse identical operator-attention presentation.
+ * Raw messages and threads remain untouched; callers retain the newest message
+ * as the deep-link representative and the oldest/newest identity as evidence. */
+export interface GroupableOperatorMailItem extends OperatorMailItem {
+  readonly id: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly to: string;
+  readonly rig?: string;
+  readonly priority?: number;
+}
+
+export interface OperatorMailAttentionGroup<T extends GroupableOperatorMailItem> {
+  readonly representative: T;
+  readonly oldest: T;
+  readonly count: number;
+}
+
 /**
  * Agent kind, derived from the wire data (the supervisor does not label kinds
  * directly — see classification rules in {@link agentKind}):
@@ -81,6 +99,43 @@ export function selectOperatorActionableUnread<T extends OperatorMailItem>(
   mail: readonly T[],
 ): readonly T[] {
   return mail.filter((m) => !m.read && !isPoolWorkerSender(m.from));
+}
+
+/**
+ * Groups repeated actionable notices for the human-facing attention surface
+ * only. Identity is deliberately strict: subject, full body, recipient, rig,
+ * and priority must all match. A changed anomaly body therefore creates a new
+ * group. Raw Mail rows are never removed or rewritten.
+ */
+export function groupOperatorActionableUnread<T extends GroupableOperatorMailItem>(
+  mail: readonly T[],
+): readonly OperatorMailAttentionGroup<T>[] {
+  const groups = new Map<string, { representative: T; oldest: T; count: number }>();
+  for (const item of selectOperatorActionableUnread(mail)) {
+    const key = JSON.stringify([
+      item.subject,
+      item.body,
+      item.to,
+      item.rig ?? null,
+      item.priority ?? null,
+    ]);
+    const existing = groups.get(key);
+    if (existing === undefined) {
+      groups.set(key, { representative: item, oldest: item, count: 1 });
+      continue;
+    }
+    existing.count += 1;
+    if (newerMail(item, existing.representative)) existing.representative = item;
+    if (newerMail(existing.oldest, item)) existing.oldest = item;
+  }
+  return [...groups.values()].sort((a, b) =>
+    b.representative.created_at.localeCompare(a.representative.created_at),
+  );
+}
+
+function newerMail(a: GroupableOperatorMailItem, b: GroupableOperatorMailItem): boolean {
+  const byTime = a.created_at.localeCompare(b.created_at);
+  return byTime > 0 || (byTime === 0 && a.id.localeCompare(b.id) > 0);
 }
 
 /**

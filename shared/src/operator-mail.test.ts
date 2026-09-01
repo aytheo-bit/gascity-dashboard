@@ -10,13 +10,28 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isPoolWorkerSender,
+  groupOperatorActionableUnread,
   selectOperatorActionableUnread,
+  type GroupableOperatorMailItem,
   type OperatorMailItem,
 } from './operator-mail.js';
 
 function mail(overrides: Partial<OperatorMailItem>): OperatorMailItem {
   return {
     from: 'mayor',
+    read: false,
+    created_at: '2026-06-07T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function groupableMail(overrides: Partial<GroupableOperatorMailItem>): GroupableOperatorMailItem {
+  return {
+    id: 'mail-1',
+    from: 'mayor',
+    to: 'human',
+    subject: 'ESCALATION: Reaper anomalies detected [MEDIUM]',
+    body: 'bulk prune skipped: backup stale',
     read: false,
     created_at: '2026-06-07T12:00:00.000Z',
     ...overrides,
@@ -76,4 +91,43 @@ test('selectOperatorActionableUnread preserves input order (caller owns sort)', 
     selectOperatorActionableUnread(items).map((m) => m.from),
     ['mayor', 'clerk'],
   );
+});
+
+test('groups exact repeated attention notices while retaining newest and oldest identities', () => {
+  const groups = groupOperatorActionableUnread([
+    groupableMail({ id: 'middle', created_at: '2026-06-07T11:00:00.000Z' }),
+    groupableMail({ id: 'oldest', created_at: '2026-06-07T10:00:00.000Z' }),
+    groupableMail({ id: 'newest', created_at: '2026-06-07T12:00:00.000Z' }),
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0]?.count, 3);
+  assert.equal(groups[0]?.representative.id, 'newest');
+  assert.equal(groups[0]?.oldest.id, 'oldest');
+});
+
+test('keeps changed body, recipient, rig, and priority as separate attention groups', () => {
+  const base = groupableMail({ id: 'base' });
+  const groups = groupOperatorActionableUnread([
+    base,
+    groupableMail({ id: 'body', body: 'bulk prune skipped: a different backup is stale' }),
+    groupableMail({ id: 'to', to: 'another-human' }),
+    groupableMail({ id: 'rig', rig: 'another-rig' }),
+    groupableMail({ id: 'priority', priority: 1 }),
+  ]);
+  assert.equal(groups.length, 5);
+});
+
+test('grouping excludes read messages and pool-worker firehose without mutating raw input', () => {
+  const raw = [
+    groupableMail({ id: 'shown' }),
+    groupableMail({ id: 'read', read: true }),
+    groupableMail({ id: 'pool', from: 'polecat-7' }),
+  ];
+  const before = structuredClone(raw);
+  const groups = groupOperatorActionableUnread(raw);
+  assert.deepEqual(
+    groups.map((group) => group.representative.id),
+    ['shown'],
+  );
+  assert.deepEqual(raw, before);
 });

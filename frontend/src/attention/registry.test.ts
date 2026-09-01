@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { selectOperatorActionableUnread } from 'gas-city-dashboard-shared';
+import {
+  groupOperatorActionableUnread,
+  selectOperatorActionableUnread,
+} from 'gas-city-dashboard-shared';
 import type {
   DeployList,
   DoltNomsTrend,
@@ -365,7 +368,7 @@ describe('createAttentionContributors', () => {
     ]);
   });
 
-  it('Mail badge count equals the Mail page selector count — one selectOperatorActionableUnread (gascity-dashboard-2j8e.5)', () => {
+  it('groups exact repeated actionable mail in the badge while preserving every raw Mail row', () => {
     const items = [
       message({ id: 'A', from: 'mayor', read: false, created_at: '2026-06-07T11:00:00.000Z' }),
       message({ id: 'B', from: '/home/ds/gascity/polecat-1', read: false }),
@@ -377,12 +380,14 @@ describe('createAttentionContributors', () => {
         mail: { items, nowMs: Date.parse('2026-06-07T12:00:00.000Z') },
       }),
     ).byDomain.mail;
-    // The Mail page derives its count from the SAME selector, so the two cannot
-    // disagree: the polecat firehose (B) and the read message (D) drop, leaving
-    // the mayor + clerk escalations.
+    // Raw Mail keeps every row. The human-facing badge groups A and C because
+    // their subject/body/to/rig/priority identities are exact matches.
     const pageCount = selectOperatorActionableUnread(items).length;
+    const attentionGroupCount = groupOperatorActionableUnread(items).length;
     expect(pageCount).toBe(2);
-    expect(badge.attention + badge.watch).toBe(pageCount);
+    expect(items).toHaveLength(4);
+    expect(attentionGroupCount).toBe(1);
+    expect(badge.attention + badge.watch).toBe(attentionGroupCount);
   });
 
   it('never counts a supervisor partial read as a run (gascity-dashboard-2j8e.2)', () => {
@@ -580,16 +585,8 @@ describe('createAttentionContributors', () => {
       }),
     );
 
-    // gascity-dashboard-2j8e.3: a long-stale ready-unclaimed open bead surfaces
-    // (attention tier); an assigned in-progress bead is working-as-intended and
-    // no longer counts (the stale-assigned emitter was removed with the badge
-    // redefinition).
-    expect(model.byDomain.beads.items.map((item) => item.id)).toEqual([
-      'beads:B-stale-open:ready-unclaimed',
-    ]);
-    expect(model.byDomain.beads.items.map((item) => item.href)).toEqual([
-      '/beads?bead=B-stale-open',
-    ]);
+    // Unclaimed backlog is not a request for the operator, regardless of age.
+    expect(model.byDomain.beads.items).toEqual([]);
     expect(model.byDomain.mail.items.map((item) => item.id)).toContain(
       'mail:M-stale-unread:unread-stale',
     );
@@ -688,7 +685,7 @@ describe('createAttentionContributors', () => {
     ]);
   });
 
-  it('counts ready-unclaimed + escalated beads and excludes plain dependency-blocked (gascity-dashboard-2j8e.3)', () => {
+  it('counts explicit escalations and excludes unclaimed or dependency-blocked backlog', () => {
     const nowMs = Date.parse('2026-06-01T12:00:00.000Z');
     const model = composeAttention(
       createAttentionContributors({
@@ -696,7 +693,7 @@ describe('createAttentionContributors', () => {
           decisionLabel: NEEDS_STEPHANIE_LABEL,
           nowMs,
           items: [
-            // ready-unclaimed: open, no assignee, aged past the watch window.
+            // Unclaimed backlog is not an operator request.
             bead({
               created_at: '2026-05-29T11:00:00.000Z',
               id: 'B-ready',
@@ -731,8 +728,8 @@ describe('createAttentionContributors', () => {
     );
 
     const ids = model.byDomain.beads.items.map((item) => item.id);
-    expect([...ids].sort()).toEqual(['beads:B-esc:escalated', 'beads:B-ready:ready-unclaimed']);
-    expect(model.byDomain.beads.attention).toBe(2);
+    expect(ids).toEqual(['beads:B-esc:escalated']);
+    expect(model.byDomain.beads.attention).toBe(1);
   });
 
   it('surfaces each open mayor-decision bead as an attention item linked to the bead view', () => {

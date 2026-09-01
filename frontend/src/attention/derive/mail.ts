@@ -1,5 +1,5 @@
 import type { Message } from 'gas-city-dashboard-shared/gc-supervisor';
-import { selectOperatorActionableUnread } from 'gas-city-dashboard-shared';
+import { groupOperatorActionableUnread } from 'gas-city-dashboard-shared';
 import { elapsedSince, formatElapsed } from '../elapsed';
 import type { AttentionItem } from '../compose';
 import { domainAttention, domainUnavailable, domainWatch, type ReadFreshnessFacts } from './shared';
@@ -41,22 +41,24 @@ export function deriveMailAttention(
     );
   }
   const nowMs = facts.nowMs ?? Date.now();
-  // gascity-dashboard-2j8e.5: the Mail badge counts the operator's needs-you
-  // mail — unread, minus the pool-worker firehose (the ~93 inflation) — via the
-  // SAME selectOperatorActionableUnread the Mail page reads over the operator
-  // inbox, so the badge and the page agree on one selector (mirrors the Runs
-  // selectBlockedRuns). Every kept message is addressed to the operator (the
-  // fetch reads the operator inbox), so each surfaces as an attention item.
-  for (const message of selectOperatorActionableUnread(facts.items ?? [])) {
+  // The Mail page preserves every raw message. This human-facing attention
+  // surface first applies the same needs-you filter, then groups only exact
+  // subject/body/to/rig/priority repeats so a recurring anomaly is one signal.
+  for (const group of groupOperatorActionableUnread(facts.items ?? [])) {
+    const message = group.representative;
     const staleAgeMs = elapsedSince(message.created_at, nowMs);
     const stale = staleAgeMs !== null && staleAgeMs >= MAIL_UNREAD_STALE_MS;
+    const repeatSummary =
+      group.count > 1
+        ? `${group.count} identical alerts · first ${group.oldest.created_at} · latest ${message.created_at} · `
+        : '';
     items.push(
       domainAttention('mail', {
         id: `mail:${message.id}:${stale ? 'unread-stale' : 'unread'}`,
         title: message.subject,
         summary: stale
-          ? `from ${message.from}, unread for ${formatElapsed(staleAgeMs)}`
-          : `from ${message.from}`,
+          ? `${repeatSummary}from ${message.from}, unread for ${formatElapsed(staleAgeMs)}`
+          : `${repeatSummary}from ${message.from}`,
         href: mailHref(message.id),
         updatedAt: message.created_at,
       }),

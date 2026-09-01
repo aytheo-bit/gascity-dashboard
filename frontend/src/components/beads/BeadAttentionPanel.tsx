@@ -6,8 +6,8 @@ import { StatusBadge } from '../StatusBadge';
 // counterpart of the Beads nav badge. It renders the badge-counting attention
 // items (attention + watch tiers, the same `summary.attention + summary.watch`
 // the nav indicator shows), so the page count and the nav badge cannot
-// disagree, and gives each item a path to act: Open the escalation / decision /
-// ready-unclaimed bead to act on it. The operator does not claim beads — a bead
+// disagree, and gives each item a path to act: Open the explicit escalation or
+// decision bead. The operator does not claim beads — a bead
 // assignee must be a concrete session, never the human operator
 // (gascity-dashboard-2j8e.8) — so there is no inline Claim affordance.
 
